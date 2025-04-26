@@ -2,9 +2,9 @@
 import * as THREE from 'three'
 import { OrbitControls, ParametricGeometry } from 'three/examples/jsm/Addons.js'
 import { WebGPURenderer, MeshPhysicalNodeMaterial } from 'three/webgpu'
-import { abs, floor, Fn, fract, sin, texture, uniform, uv, vec4 } from 'three/tsl'
+import { abs, floor, Fn, fract, sin, texture, uniform, uv } from 'three/tsl'
 import Stats from 'three/examples/jsm/libs/stats.module.js'
-import scaling from '/scaling.png'
+import scaling from '/nge.png'
 
 // constants ->
 const device = {
@@ -25,10 +25,10 @@ export class Sketch {
     time: number
     stats?: Stats
     memPanel: any
+    isAnimating: boolean = true
 
     constructor(canvas: HTMLCanvasElement) {
         this.time = 0
-        this.initStats()
 
         this.canvas = canvas
         this.scene = new THREE.Scene()
@@ -46,24 +46,34 @@ export class Sketch {
         this.renderer.setSize(device.width, device.height)
         this.renderer.setPixelRatio(Math.min(device.pixelRatio, 2))
         this.renderer.setClearColor(0xeeeeee, 1)
-        this.initWebGPU()
 
         this.controls = new OrbitControls(this.camera, canvas)
         this.clock = new THREE.Clock()
 
-        this.addLights()
-        this.resize()
-        if (this.isInitialized) {
-            this.getGeometry()
-            this.render()
-        }
+        this.initStats()
+        this.init()
     }
 
     addLights(): void {
-        const pointLight = new THREE.PointLight(0xffffff, 1000)
+        const pointLight = new THREE.PointLight(0xffffff, 100)
         pointLight.position.set(10, 10, 10)
         this.scene.add(new THREE.AmbientLight(new THREE.Color(1, 1, 1), 10))
         this.scene.add(pointLight)
+    }
+
+    async init(): Promise<void> {
+        try {
+            await this.initWebGPU()
+            this.addLights()
+            this.getGeometry()
+            // this.addCubeMesh()
+            this.resize()
+
+            this.isInitialized = true
+            this.render()
+        } catch (e) {
+            console.error('webgpu init failed', e)
+        }
     }
 
     async initWebGPU(): Promise<void> {
@@ -79,9 +89,7 @@ export class Sketch {
             gpuRenderer.setPixelRatio(Math.min(device.pixelRatio, 2))
 
             this.renderer = gpuRenderer
-            this.isInitialized = true
             console.log('web gpu renderer initialized')
-            this.render()
         } catch (e) {
             console.error('web gpu initialization failed', e)
             console.log('falling back to webgl renderer')
@@ -89,14 +97,16 @@ export class Sketch {
     }
 
     render(): void {
+        if (!this.isInitialized) {
+            return
+        }
+
         this.stats?.begin()
-        this.time -= 0.002
+        this.time += 0.0005
         this.controls.update()
-        if (this.isInitialized) {
-            this.getGeometry()
+        if (this.playhead) {
             this.playhead.value = this.time
         }
-        // this.playhead?.value = this.time
 
         this.renderer.render(this.scene, this.camera)
 
@@ -160,29 +170,28 @@ export class Sketch {
         this.playhead = playhead
 
         let map = new THREE.TextureLoader().load(scaling)
-        map.colorSpace = THREE.SRGBColorSpace
-        map.minFilter = THREE.LinearFilter
-        map.magFilter = THREE.LinearFilter
         map.wrapS = THREE.RepeatWrapping
         map.wrapT = THREE.RepeatWrapping
-        map.repeat.set(1, 1)
 
-        material.colorNode = Fn(() => {
-            // let row = floor(fract(uv().y.add(playhead)).mul(20))
-            // let randomValue = abs(fract(sin(row.mul(125)).mul(456789.123)))
+        const calculated = Fn(() => {
+            let row = floor(fract(uv().y.add(playhead)).mul(20))
+            let randomValue = abs(fract(sin(row.mul(125)).mul(456789.123)))
 
             let newUv = uv().toVar()
             newUv.mulAssign(1)
-            newUv.x.mulAssign(3)
-            newUv.y.mulAssign(20)
-            newUv.y.addAssign(playhead)
-            newUv.assign(newUv.fract())
+            newUv.x.mulAssign(7).addAssign(playhead.mul(randomValue))
+            newUv.y.mulAssign(10)
+            newUv.y.addAssign(playhead).mul(-1.0)
 
-            texture(map, newUv)
-        })()
+            return texture(map, newUv).r.oneMinus()
+        })
+
+        material.colorNode = calculated()
+        material.roughnessNode = calculated()
+
 
         const mesh = new THREE.Mesh(geometry, material)
-        mesh.rotation.x = -1
+        mesh.rotation.x = -2
         this.scene.add(mesh)
     }
 
@@ -193,5 +202,21 @@ export class Sketch {
         // this.memPanel = this.stats.panels[2]
         this.stats.dom.style.cssText = 'position:absolute;top:0;left:0;'
         document.body.appendChild(this.stats.dom)
+    }
+
+    addCubeMesh(): void {
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+
+        const material = new THREE.MeshStandardMaterial({
+            color: 0x3498db,
+            roughness: 0.5,
+            metalness: 0.2
+        });
+
+        const cubeMesh = new THREE.Mesh(geometry, material);
+        cubeMesh.position.set(0, 0, 0);
+        cubeMesh.rotation.set(0.5, 0.5, 0);
+        this.scene.add(cubeMesh);
+        console.log('Basic cube mesh added to scene');
     }
 }
